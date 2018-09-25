@@ -74,7 +74,7 @@ public class GMLFeatureWriter {
         xml += "<gml:Polygon>";
 
         Polygon polygon = poly;
-        
+
         while (polygon != null) {
 
             if (!polygon.getInteriorRing()) {
