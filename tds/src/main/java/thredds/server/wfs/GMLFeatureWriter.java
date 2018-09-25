@@ -74,8 +74,8 @@ public class GMLFeatureWriter {
         xml += "<gml:Polygon>";
 
         Polygon polygon = poly;
-
-        while (polygon != null) {
+        
+    //    while (polygon != null) {
 
             if (!polygon.getInteriorRing()) {
                 xml += "<gml:exterior><gml:LinearRing><gml:posList>";
@@ -98,8 +98,8 @@ public class GMLFeatureWriter {
                 xml += "</gml:posList></gml:LinearRing></gml:interior>";
             }
 
-            polygon = polygon.getNext();
-        }
+      //      polygon = polygon.getNext();
+       // }
 
         xml += "</gml:Polygon>";
         return xml;

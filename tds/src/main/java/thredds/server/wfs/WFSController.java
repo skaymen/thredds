@@ -3,7 +3,10 @@ package thredds.server.wfs;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 
-import ucar.nc2.VariableSimpleIF;
+import thredds.core.TdsRequestedDataset;
+import ucar.nc2.dataset.CoordinateSystem;
+import ucar.nc2.dataset.NetcdfDataset;
+import ucar.nc2.ft2.coverage.adapter.SimpleGeometryCSBuilder;
 import ucar.nc2.ft2.coverage.simpgeometry.*;
 
 import java.io.IOException;
@@ -54,12 +57,18 @@ public class WFSController extends HttpServlet {
 	 * @param out
 	 * @return
 	 */
-	private void getCapabilities(PrintWriter out, HttpServletRequest hsreq) {
+	private void getCapabilities(PrintWriter out, HttpServletRequest hsreq, SimpleGeometryCSBuilder sgcs) {
 		WFSGetCapabilitiesWriter gcdw = new WFSGetCapabilitiesWriter(out, WFSController.constructServerPath(hsreq));
 		gcdw.startXML();
 		gcdw.addOperation(WFSRequestType.GetCapabilities); gcdw.addOperation(WFSRequestType.DescribeFeatureType); gcdw.addOperation(WFSRequestType.GetFeature);
 		gcdw.writeOperations();
-		gcdw.addFeature(new WFSFeature(TDSNAMESPACE + ":hru_soil_moist", "hru_soil_moist"));
+		
+		List<String> seriesNames = sgcs.getGeometrySeriesNames();
+		
+		for(String name : seriesNames) {
+			gcdw.addFeature(new WFSFeature(TDSNAMESPACE + ":" + name, name));
+		}
+
 		gcdw.writeFeatureTypes();
 		gcdw.finishXML();
 	}
@@ -68,7 +77,7 @@ public class WFSController extends HttpServlet {
 		WFSDescribeFeatureTypeWriter dftw = new WFSDescribeFeatureTypeWriter(out, WFSController.constructServerPath(hsreq), WFSController.getXMLNamespaceXMLNSValue(hsreq));
 		dftw.startXML();
 		ArrayList<WFSFeatureAttribute> attributes = new ArrayList<>();
-		attributes.add(new WFSFeatureAttribute("catchments_geometry_container", "gml:PointPropertyType"));
+		attributes.add(new WFSFeatureAttribute("catchments_geometry_container", "gml:SurfaceArrayPropertyType"));
 		attributes.add(new WFSFeatureAttribute("hruid", "int"));
 		attributes.add(new WFSFeatureAttribute("lat", "double"));
 		attributes.add(new WFSFeatureAttribute("lon", "double"));
@@ -87,25 +96,71 @@ public class WFSController extends HttpServlet {
 	 * @param out
 	 * @return
 	 */
-	private void getFeature(PrintWriter out, HttpServletRequest hsreq) {
+	private void getFeature(PrintWriter out, HttpServletRequest hsreq, SimpleGeometryCSBuilder sgcs, String ftName) {
+		
+		List<SimpleGeometry> geometryList = new ArrayList<SimpleGeometry>();
+		
+		GeometryType geoT = sgcs.getGeometryType(ftName);
+		
+		switch(geoT) {
+			case POINT:
+				Point pt = sgcs.getPoint(ftName, 0);
+				int j = 0;
+				while(pt != null) {
+					geometryList.add(pt);
+					j++;
+					try {
+						pt = sgcs.getPoint(ftName, j);
+					}
+					
+					// Perhaps will change this to be implemented in the CFPolygon class
+					catch(ArrayIndexOutOfBoundsException aout) {
+						break;
+					}
+				}
+				break;
+				
+			case LINE:
+				
+				Line line = sgcs.getLine(ftName, 0);
+				int k = 0;
+				while(line != null) {
+					geometryList.add(line);
+					k++;
+					try {
+						line = sgcs.getLine(ftName, k);
+					}
+					
+					// Perhaps will change this to be implemented in the CFPolygon class
+					catch(ArrayIndexOutOfBoundsException aout) {
+						break;
+					}
+				}	
+				
+				break;
+				
+			case POLYGON:
+				
+				Polygon poly =	sgcs.getPolygon(ftName, 0);
+				int i = 0;
+				while(poly != null) {
+					geometryList.add(poly);
+					i++;
+					try {
+						poly = sgcs.getPolygon(ftName, i);
+					}
+					
+					// Perhaps will change this to be implemented in the CFPolygon class
+					catch(ArrayIndexOutOfBoundsException aout) {
+						break;
+					}
+				}
+				
+				break;
+		}
 
-		//test out functionality for different geometries
-		ArrayList<SimpleGeometry> geometries = new ArrayList<SimpleGeometry>();
 
-		geometries.add(new CFPoint(50.0, 50.0, null, null, null));
-
-		ArrayList<Point> points = new ArrayList<Point>();
-		points.add(new CFPoint(50.0, 50.0, null, null, null));
-		geometries.add(new CFLine(points));
-
-		CFPolygon polygon = new CFPolygon(points);
-		polygon.setInteriorRing(true);
-		polygon.setNext(new CFPolygon(points));
-		polygon.getNext().setInteriorRing(false);
-		geometries.add(polygon);
-
-
-		WFSGetFeatureWriter gfdw = new WFSGetFeatureWriter(out, WFSController.constructServerPath(hsreq), WFSController.getXMLNamespaceXMLNSValue(hsreq), geometries);
+		WFSGetFeatureWriter gfdw = new WFSGetFeatureWriter(out, WFSController.constructServerPath(hsreq), WFSController.getXMLNamespaceXMLNSValue(hsreq), geometryList, ftName);
 		gfdw.startXML();
 		gfdw.writeMembers();
 		gfdw.finishXML();
@@ -118,9 +173,10 @@ public class WFSController extends HttpServlet {
 	 * @param request parameter value
 	 * @param version parameter value
 	 * @param service parameter value
+	 * @param actualFTName parameter value
 	 * @return an ExceptionWriter if any errors occurred or null if none occurred
 	 */
-	private WFSExceptionWriter checkParametersForError(String request, String version, String service) {
+	private WFSExceptionWriter checkParametersForError(String request, String version, String service, String actualFTName) {
 		// The SERVICE parameter is required. If not specified, is an error (throw exception through XML).
 		if(service != null) {
 			// For the WFS servlet it must be WFS if not, write out an InvalidParameterValue exception.
@@ -186,6 +242,7 @@ public class WFSController extends HttpServlet {
 					return new WFSExceptionWriter("WFS server error. VERSION parameter is required.", "request", "MissingParameterValue");
 
 				}
+				
 			}
 			
 			WFSRequestType reqToProc = WFSRequestType.getWFSRequestType(request);
@@ -222,6 +279,25 @@ public class WFSController extends HttpServlet {
 			String version = null;
 			String service = null;
 			String typeNames = null;
+			String datasetReqPath = null;
+			String actualPath = null;
+			String actualFTName = null;
+			NetcdfDataset dataset = null;
+			
+			if(hsreq.getServletPath().length() > 4) {
+				datasetReqPath = hsreq.getServletPath().substring(4, hsreq.getServletPath().length());
+			}
+			
+			actualPath = TdsRequestedDataset.getLocationFromRequestPath(datasetReqPath);
+			
+			if(actualPath != null) dataset = NetcdfDataset.openDataset(actualPath);
+			else return;
+			
+			if(dataset == null) hsres.sendError(HttpServletResponse.SC_NOT_FOUND);	// can't open dataset an error for sure "not found"
+			
+			List<CoordinateSystem> csList = dataset.getCoordinateSystems();
+			SimpleGeometryCSBuilder cs = new SimpleGeometryCSBuilder(dataset, csList.get(0), null);
+			
 			
 			/* Look for parameter names to assign values
 			 * in order to avoid casing issues with parameter names (such as a mismatch between reQUEST and request and REQUEST).
@@ -240,12 +316,17 @@ public class WFSController extends HttpServlet {
 					service = hsreq.getParameter(paramName);
 				}
 				
-				if(paramName.equalsIgnoreCase("TYPENAMES")) {
+				if(paramName.equalsIgnoreCase("TYPENAMES") || paramName.equalsIgnoreCase("TYPENAME")) {
 					typeNames = hsreq.getParameter(paramName);
+					
+					// Remove namespace header for getFeature
+					if(typeNames != null) if(typeNames.length() > TDSNAMESPACE.length()) {
+						actualFTName = typeNames.substring(TDSNAMESPACE.length() + 1, typeNames.length());
+					}
 				}
 			}
 			
-			WFSExceptionWriter paramError = checkParametersForError(request, version, service);
+			WFSExceptionWriter paramError = checkParametersForError(request, version, service, actualFTName);
 			
 			
 			// If parameter checks all pass launch the request
@@ -255,7 +336,7 @@ public class WFSController extends HttpServlet {
 				
 				switch(reqToProc) {
 					case GetCapabilities:
-						getCapabilities(wr, hsreq);
+						getCapabilities(wr, hsreq, cs);
 					break;
 					
 					case DescribeFeatureType:
@@ -264,7 +345,7 @@ public class WFSController extends HttpServlet {
 					break;
 					
 					case GetFeature:
-						getFeature(wr, hsreq);
+						getFeature(wr, hsreq, cs, actualFTName);
 					break;
 				}	
 				
@@ -278,7 +359,8 @@ public class WFSController extends HttpServlet {
 		}
 		
 		catch(IOException io) {
-			throw new RuntimeException("ERROR: retrieval of writer failed", io);
+			throw new RuntimeException("ERROR: An IOException has occurred. The writer may not have been able to been have retrieved"
+					+ " or the requested dataset was not found", io);
 		}
 	}
 }

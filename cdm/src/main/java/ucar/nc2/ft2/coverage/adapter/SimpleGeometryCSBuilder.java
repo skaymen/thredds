@@ -5,7 +5,9 @@
 package ucar.nc2.ft2.coverage.adapter;
 
 import ucar.nc2.Dimension;
+import ucar.nc2.Variable;
 import ucar.nc2.constants.AxisType;
+import ucar.nc2.constants.CF;
 import ucar.nc2.constants.FeatureType;
 import ucar.nc2.dataset.*;
 import ucar.nc2.ft2.coverage.simpgeometry.GeometryType;
@@ -64,10 +66,13 @@ public class SimpleGeometryCSBuilder {
   private List<CoordinateAxis> sgAxes;
   private List<CoordinateTransform> coordTransforms;
   private List<Dimension> dims;
+  private List<String> geometrySeriesVarNames;
+  private List<String> geometryContainerNames;
   private SimpleGeometryReader geometryReader;
+  private Map<String, List<String>> geometryContainersAssoc;
   private ProjectionImpl orgProj;
-
-  SimpleGeometryCSBuilder(NetcdfDataset ds, CoordinateSystem cs, Formatter errlog) {
+  
+  public SimpleGeometryCSBuilder(NetcdfDataset ds, CoordinateSystem cs, Formatter errlog) {
 
     // must be at least 2 dimensions
     if (cs.getRankDomain() < 2) {
@@ -76,8 +81,38 @@ public class SimpleGeometryCSBuilder {
     }
     
     sgAxes = new ArrayList<CoordinateAxis>();
+    geometrySeriesVarNames = new ArrayList<String>();
+    geometryContainerNames = new ArrayList<String>();
+    geometryContainersAssoc = new HashMap<String, List<String>>();
     dims = ds.getDimensions();
     allAxes = cs.getCoordinateAxes();
+    
+    // Look through the variables and build a list of geometry variables, also build up map of simple geometry containers 
+    for(Variable var : ds.getVariables()) {
+    	if(!var.findAttValueIgnoreCase(CF.GEOMETRY, "").equals("")) {
+    		
+    		geometrySeriesVarNames.add(var.getFullNameEscaped());
+    		String varName = var.findAttValueIgnoreCase(CF.GEOMETRY, "");
+    		
+    		// Using the Geometry Container name, add this variable as a reference to that container
+    		
+    		// Check if container exists
+    		if(ds.findVariable(varName) != null) {
+    		
+    			// Add container name to container name list, if not present already
+    			if(!geometryContainerNames.contains(varName)) geometryContainerNames.add(varName);
+    			
+    			// If the list is null, instantiate it
+    			if(geometryContainersAssoc.get(varName) == null) {
+    				List<String> strList = new ArrayList<String>();
+    				geometryContainersAssoc.put(varName, strList);
+    			}
+    		
+    			// Then add this variable as a reference.
+    			geometryContainersAssoc.get(var.findAttValueIgnoreCase(CF.GEOMETRY, "")).add(var.getFullNameEscaped());
+    		}
+    	}
+    }
     
     // Create Simple Geometry Reader if there are any Axes with type SimpleGeometryID
     // Also, populate simple geometry axis list 
@@ -111,9 +146,6 @@ public class SimpleGeometryCSBuilder {
     return null;
   }
 
-  public FeatureType getCoverageType() {
-    return type;
-  }
   
   /**
    * Returns the list of all axes contained in this coordinate system.
@@ -265,6 +297,37 @@ public class SimpleGeometryCSBuilder {
 	  
 	  return ptList;
   }
+  
+  /**
+   * Returns the names of variables which are detected
+   * as geometry containers.
+   * 
+   * @return variable name
+   */
+  public List<String> getGeometryContainerNames(){
+	  return this.geometryContainerNames;
+  }
+  
+  /**
+   * Returns the names of variables which are detected
+   * as geometry data series.
+   * 
+   * @return variable name
+   */
+  public List<String> getGeometrySeriesNames(){
+	  return this.geometrySeriesVarNames;
+  }
+  
+  /**
+   * Returns a list of variables (in no particular order)
+   * which utilize the given geometry container.
+   * 
+   * @param nameOfContainer to find associations for
+   * @return associations (if any) null if none
+   */
+  public List<String> getGeometryContainerAssociations(String nameOfContainer){
+	 return this.geometryContainersAssoc.get(nameOfContainer); 
+  }
 
   public SimpleGeometryCS makeCoordSys() {
     if (type == null) return null;
@@ -277,6 +340,15 @@ public class SimpleGeometryCSBuilder {
     }
   }
 
+  /**
+   * Returns the feature type of this type
+   * 
+   * @return
+   */
+  public FeatureType getCoverageType() {
+	  return this.type;
+  }
+  
   @Override
   public String toString() {
     Formatter f2 = new Formatter();

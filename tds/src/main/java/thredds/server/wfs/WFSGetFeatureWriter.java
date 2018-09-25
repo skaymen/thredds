@@ -2,10 +2,8 @@ package thredds.server.wfs;
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.ArrayList;
+import java.util.List;
 
-import ucar.nc2.ft2.coverage.simpgeometry.CFPoint;
-import ucar.nc2.ft2.coverage.simpgeometry.Point;
 import ucar.nc2.ft2.coverage.simpgeometry.SimpleGeometry;
 
 /**
@@ -21,7 +19,8 @@ public class WFSGetFeatureWriter {
 	private String fileOutput;
 	private final String namespace;
 	private final String server;
-	private ArrayList<SimpleGeometry> geometries;
+	private final String ftName;
+	private List<SimpleGeometry> geometries;
 	
 	/**
 	 * Writes headers and bounding box
@@ -29,7 +28,7 @@ public class WFSGetFeatureWriter {
 	private void writeHeadersAndBB() {
 		fileOutput += "<wfs:FeatureCollection xsi:schemaLocation=" + WFSXMLHelper.encQuotes("http://www.opengis.net/wfs/2.0 http://schemas.opengis.net/wfs/2.0/wfs.xsd " + namespace + " " + server
 					+ "?request=DescribeFeatureType" + WFSXMLHelper.AMPERSAND + "service=wfs" + WFSXMLHelper.AMPERSAND + "version=2.0.0" + WFSXMLHelper.AMPERSAND + "typename=" 
-					+ WFSController.TDSNAMESPACE + "%3A" + "hru_soil_moist")
+					+ WFSController.TDSNAMESPACE + "%3A" + ftName)
 				+ " xmlns:xsi=" + WFSXMLHelper.encQuotes("http://www.w3.org/2001/XMLSchema-instance")
 				+ " xmlns:xlink=" + WFSXMLHelper.encQuotes("http://www.w3.org/1999/xlink")
 				+ " xmlns:gml=" + WFSXMLHelper.encQuotes("http://opengis.net/gml/3.2")
@@ -38,7 +37,8 @@ public class WFSGetFeatureWriter {
 				+ " xmlns:wfs=" + WFSXMLHelper.encQuotes("http://opengis.net/wfs/2.0") 
 				+ " xmlns:" + WFSController.TDSNAMESPACE +"=" + WFSXMLHelper.encQuotes(namespace)
 				+ " xmlns=" + WFSXMLHelper.encQuotes("http://www.opengis.net/wfs/2.0")
-				+ " version=\"2.0.0\" numberMatched=\"1\" numberReturned=\"1\">"
+				+ " version=\"2.0.0\" numberMatched=" + WFSXMLHelper.encQuotes(String.valueOf(geometries.size())) + " numberReturned=" 
+				+ WFSXMLHelper.encQuotes(String.valueOf(geometries.size())) + ">"
 		
 		   // WFS Bounding Box
 			+ "<wfs:boundedBy>"
@@ -62,10 +62,16 @@ public class WFSGetFeatureWriter {
 	 * member and so writeMembers add each member to the fileOutput
 	 */
 	public void writeMembers() {
+		int index = 1;
+		GMLFeatureWriter writer = new GMLFeatureWriter();
+		for(SimpleGeometry geometryItem: geometries) {
 			fileOutput
-				   += "<wfs:member>" 
+				   += "<wfs:member>"
 					
-				   // GML Bounding Box
+					// Write Geometry Information
+					+ "<" + WFSController.TDSNAMESPACE + ":" + ftName + " gml:id=\"" + ftName + "." + index + "\">"
+					
+					// GML Bounding Box
 					+ "<gml:boundedBy>"
 					+ "<gml:Envelope srsName=" + "\"urn:ogc:def:crs:EPSG::4326\"" + ">"
 							+ "<gml:lowerCorner>" + "-180 -90" + "</gml:lowerCorner>"
@@ -73,23 +79,19 @@ public class WFSGetFeatureWriter {
 					+ "</gml:Envelope>"
 					+ "</gml:boundedBy>"
 					
-					// Write Geometry Information
-					+ "<" + WFSController.TDSNAMESPACE + ":hru_soil_moist gml:id=\"hru_soil_moist.1\">"
 					+ "<" + WFSController.TDSNAMESPACE + ":catchments_geometry_container>";
 
 			//write GML features
-			GMLFeatureWriter writer = new GMLFeatureWriter();
-			for (SimpleGeometry geom : geometries) {
-
-				fileOutput += writer.writeFeature(geom);
-
-			}
+			fileOutput += writer.writeFeature(geometryItem);
 					
 			// Cap off headers
 			fileOutput
 					+="</" + WFSController.TDSNAMESPACE + ":catchments_geometry_container>"
-					+ "</" + WFSController.TDSNAMESPACE + ":hru_soil_moist>"
+					+ "</" + WFSController.TDSNAMESPACE + ":" + ftName +">"
 					+ "</wfs:member>";
+			
+			index++;
+		}
 	}
 	
 	/**
@@ -111,11 +113,12 @@ public class WFSGetFeatureWriter {
 	 * @param namespace WFS TDS Namespace URI
 	 * @throws IOException 
 	 */
-	public WFSGetFeatureWriter(PrintWriter response, String server, String namespace, ArrayList<SimpleGeometry> geometries) {
+	public WFSGetFeatureWriter(PrintWriter response, String server, String namespace, List<SimpleGeometry> geometries, String ftName) {
 		this.fileOutput = "";
 		this.response = response;
 		this.server = server;
 		this.namespace = namespace;
 		this.geometries = geometries;
+		this.ftName = ftName;
 	}
 }
